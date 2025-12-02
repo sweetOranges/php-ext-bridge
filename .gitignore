@@ -1,0 +1,5 @@
+build/
+test/gen-cpp/
+test/gen-php/
+test/vendor/
+test/plugins/
