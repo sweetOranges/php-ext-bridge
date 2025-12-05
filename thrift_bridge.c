@@ -31,15 +31,15 @@ namespace TC {
 // --- A. 处理器工厂 (ProcessorFactory) ---
 class ProcessorFactory {
 private:
-    map<string, boost::shared_ptr<TProcessor>> processors_;
+    map<string, shared_ptr<TProcessor>> processors_;
     
 public:
-    void registerProcessor(const string& service_name, boost::shared_ptr<TProcessor> processor) {
+    void registerProcessor(const string& service_name,shared_ptr<TProcessor> processor) {
         processors_[service_name] = processor;
         cout << "[CoreLib] Registered Service: " << service_name << endl;
     }
 
-    boost::shared_ptr<TProcessor> getProcessor(const string& service_name) {
+   shared_ptr<TProcessor> getProcessor(const string& service_name) {
         auto it = processors_.find(service_name);
         return (it != processors_.end()) ? it->second : nullptr;
     }
@@ -48,10 +48,16 @@ public:
     static void staticRegisterCallback(void* factory_instance, const char* service_name, void* t_processor_ptr) {
         ProcessorFactory* factory = static_cast<ProcessorFactory*>(factory_instance);
         // 使用 shared_ptr 包装 TProcessor，保证其生命周期
-        boost::shared_ptr<TProcessor> processor((TProcessor*)t_processor_ptr);
+       shared_ptr<TProcessor> processor((TProcessor*)t_processor_ptr);
         factory->registerProcessor(service_name, processor);
     }
+    void clean()
+    {
+        processors_.clear();
+    }
 };
+
+
 }
 
 static TC::ProcessorFactory global_factory; 
@@ -135,17 +141,17 @@ static char* process_thrift_data_generic(
     if (!core_initialized) return nullptr;
 
     string service_str(service_name, service_len);
-    boost::shared_ptr<TProcessor> processor = global_factory.getProcessor(service_str);
+    shared_ptr<TProcessor> processor = global_factory.getProcessor(service_str);
 
     if (!processor) {
         return nullptr;
     }
     
-    boost::shared_ptr<TMemoryBuffer> input_transport(new TMemoryBuffer((uint8_t*)input_buf, input_len));
-    boost::shared_ptr<TMemoryBuffer> output_transport(new TMemoryBuffer());
+    shared_ptr<TMemoryBuffer> input_transport(new TMemoryBuffer((uint8_t*)input_buf, input_len));
+    shared_ptr<TMemoryBuffer> output_transport(new TMemoryBuffer());
     
-    boost::shared_ptr<TBinaryProtocol> input_protocol(new TBinaryProtocol(input_transport));
-    boost::shared_ptr<TBinaryProtocol> output_protocol(new TBinaryProtocol(output_transport));
+    shared_ptr<TBinaryProtocol> input_protocol(new TBinaryProtocol(input_transport));
+    shared_ptr<TBinaryProtocol> output_protocol(new TBinaryProtocol(output_transport));
 
     try {
         if (!processor->process(input_protocol, output_protocol, nullptr)) {
@@ -167,6 +173,8 @@ static char* process_thrift_data_generic(
     
     return result; 
 }
+
+
 // -----------------------------------------------------
 // C 库导出函数
 // -----------------------------------------------------
@@ -202,8 +210,8 @@ PHP_MINIT_FUNCTION(thrift_bridge)
 // --- 模块关闭函数 (MSHUTDOWN) ---
 PHP_MSHUTDOWN_FUNCTION(thrift_bridge)
 {
-    UNREGISTER_INI_ENTRIES();
-    
+    UNREGISTER_INI_ENTRIES(); 
+    global_factory.clean();   
     // 释放所有插件句柄 (防止内存泄漏，虽然在 MSHUTDOWN 时 PHP 进程可能即将退出)
     for (void* handle : plugin_handles) {
         dlclose(handle);

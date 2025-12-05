@@ -11,7 +11,7 @@ require_once __DIR__ . '/gen-php/DynamicExt/DynamicServiceA.php';
 require_once __DIR__ . '/vendor/autoload.php';
 
 // --- 引入 Thrift 核心组件和生成的类 ---
-use \Thrift\Protocol\TBinaryProtocol;
+use \Thrift\Protocol\TBinaryProtocolAccelerated;
 use \Thrift\Transport\TTransport;
 
 // 引入生成的 Service Client 和 Data Structures
@@ -103,40 +103,19 @@ class ThriftBridgeTransport extends TTransport
         $this->wBuf = '';
     }
 }
-function callServiceMethod(string $serviceName, string $methodName, array $params)
-{
-    // 1. 实例化我们的桥接 Transport
-    $transport = new ThriftBridgeTransport($serviceName);
-    
-    // 2. 实例化标准的 Protocol
-    $protocol = new TBinaryProtocol($transport);
-
-    // 3. 实例化 Client
-    $clientClassName = "DynamicExt\\" . $serviceName . "Client";
-    $client = new $clientClassName($protocol); 
-
-    // 4. 标准的 Transport 操作
-    $transport->open(); 
-    
-    // 5. 准备参数对象
-    $inputData = new InputData($params);
-    
-    // 6. 调用 Client 方法 (触发 write 和 flush)
-    $output = $client->$methodName($inputData);
-    
-    $transport->close();
-    
-    return $output;
-}
 
 // ----------------------------------------------------
 // --- 实际测试：与标准 Thrift 调用一致 ---
 // ----------------------------------------------------
 
 try {
-    // TEST 1: 成功调用
+    $serviceName = 'DynamicServiceA';
+    // 3. 实例化 Client
+    $client = new DynamicExt\DynamicServiceAClient(new TBinaryProtocolAccelerated(new ThriftBridgeTransport($serviceName))); 
+
+
     $input_success = ['transaction_id' => 101, 'amount' => 60.00];
-    $output_success = callServiceMethod('DynamicServiceA', 'process_transaction_a', $input_success);
+    $output_success = $client->process_transaction_a(new InputData($input_success));
 
     echo "Status: " . ($output_success->result_flag ? 'OK' : 'FAIL') . "\n";
     echo "Message: " . $output_success->message . "\n";
@@ -145,7 +124,7 @@ try {
 
     // TEST 2: 失败调用 (CoreLib 逻辑失败)
     $input_fail = ['transaction_id' => 102, 'amount' => 150.00];
-    $output_fail = callServiceMethod('DynamicServiceA', 'process_transaction_a', $input_fail);
+    $output_fail = $client->process_transaction_a(new InputData($input_fail));
 
     echo "Status: " . ($output_fail->result_flag ? 'OK' : 'FAIL') . "\n";
     echo "Message: " . $output_fail->message . "\n";

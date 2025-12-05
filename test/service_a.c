@@ -33,7 +33,7 @@ extern "C" {
     void register_thrift_processors(ProcessorFactoryContext* context) {
         cout << "  [ServiceA Plugin] Initializing DynamicServiceA..." << endl;
         
-        boost::shared_ptr<DynamicServiceAHandler> handlerA(new DynamicServiceAHandler());
+        shared_ptr<DynamicServiceAHandler> handlerA(new DynamicServiceAHandler());
         // TProcessor* 裸指针
         TProcessor* processorA = new DynamicServiceAProcessor(handlerA); 
 
