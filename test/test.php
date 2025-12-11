@@ -12,96 +12,11 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 // --- 引入 Thrift 核心组件和生成的类 ---
 use \Thrift\Protocol\TBinaryProtocolAccelerated;
-use \Thrift\Transport\TTransport;
-
-// 引入生成的 Service Client 和 Data Structures
-use DynamicExt\DynamicServiceAClient;
 use DynamicExt\InputData;
 
 // 确保我们的 PHP 扩展已加载
 if (!extension_loaded('thrift_bridge')) {
     die("Error: PHP extension 'thrift_bridge' is not loaded. Please check your php.ini.\n");
-}
-
-/**
- * 实现一个自定义 Transport，用于桥接 PHP 扩展函数 call_thrift_processor_generic。
- */
-class ThriftBridgeTransport extends TTransport
-{
-    private $serviceName; // 当前调用的目标 Service 名称
-    private $wBuf = '';   // 写入缓冲区 (接收 Client 序列化的请求)
-    private $rBuf = '';   // 读取缓冲区 (存储 CoreLib 返回的响应)
-    private $rBufPos = 0; // 读取缓冲区当前位置
-
-    public function __construct(string $serviceName)
-    {
-        $this->serviceName = $serviceName;
-    }
-
-    public function isOpen() { return true; }
-    public function open() {}
-    public function close() {}
-
-    /**
-     * TClient 调用 write() 来序列化请求数据。
-     */
-    public function write($buf)
-    {
-        $this->wBuf .= $buf;
-    }
-
-    /**
-     * TClient 调用 read() 来读取 CoreLib 返回的响应数据。
-     */
-    public function read($len)
-    {
-        if ($this->rBuf === null) {
-             throw new TTransportException('Transport is closed or not flushed.', TTransportException::UNKNOWN);
-        }
-        
-        $read = '';
-        $readLen = min($len, strlen($this->rBuf) - $this->rBufPos);
-        
-        if ($readLen > 0) {
-            $read = substr($this->rBuf, $this->rBufPos, $readLen);
-            $this->rBufPos += $readLen;
-        }
-
-        if (strlen($read) != $len && $readLen == 0) {
-             // 这是 Thrift 抛出 "No more data to read" 异常的条件
-             throw new TTransportException('Cannot read ' . $len . ' bytes from transport.', TTransportException::UNKNOWN);
-        }
-        
-        return $read;
-    }
-
-    /**
-     * Client 调用 flush() 时，我们执行核心的 C 扩展调用。
-     */
-    public function flush()
-    {
-        if (!function_exists('call_thrift_processor_generic')) {
-            throw new TTransportException('PHP extension function call_thrift_processor_generic is not available.', TTransportException::UNKNOWN);
-        }
-
-        // 1. 获取序列化后的 RPC 请求 (wBuf)
-        $requestBinary = $this->wBuf;
-        
-        // 2. 调用 C 扩展函数
-        $responseBinary = call_thrift_processor_generic($this->serviceName, $requestBinary);
-
-        // 3. 检查 CoreLib 返回结果
-        if ($responseBinary === false || $responseBinary === null) {
-            throw new TTransportException('CoreLib RPC failed or returned null.', TTransportException::UNKNOWN);
-        }
-
-        // 4. 将响应数据存入读取缓冲区
-        $this->rBuf = $responseBinary;
-        $this->rBufPos = 0;
-        
-        // 5. 清空写入缓冲区 (为下次调用做准备)
-        $this->wBuf = '';
-    }
 }
 
 // ----------------------------------------------------

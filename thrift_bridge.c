@@ -1,8 +1,15 @@
 // php_extension/php_bridge.c (编译成 thrift_bridge.so)
-
 #include "php.h"
+#include "Zend/zend_globals.h"
 #include "Zend/zend_ini.h"
+#include "Zend/zend_types.h"
+#include "Zend/zend_string.h"
+#include "Zend/zend_API.h"
+#include "Zend/zend_objects.h"
+#include "Zend/zend_exceptions.h"
 #include "ext/standard/info.h"
+#include "ext/standard/php_string.h"
+
 #include <stdlib.h> 
 #include <string.h>
 #include <iostream>
@@ -23,23 +30,20 @@
 #include "./plugin_api.h"
 #define PLUGIN_SUFFIX ".so"
 
-using namespace apache::thrift;
-using namespace apache::thrift::protocol;
-using namespace apache::thrift::transport;
-using namespace std;
+
 namespace TC {
 // --- A. 处理器工厂 (ProcessorFactory) ---
 class ProcessorFactory {
 private:
-    map<string, shared_ptr<TProcessor>> processors_;
+    std::map<std::string, std::shared_ptr<apache::thrift::TProcessor>> processors_;
     
 public:
-    void registerProcessor(const string& service_name,shared_ptr<TProcessor> processor) {
+    void registerProcessor(const std::string& service_name, std::shared_ptr<apache::thrift::TProcessor> processor) {
         processors_[service_name] = processor;
-        cout << "[CoreLib] Registered Service: " << service_name << endl;
+        std::cout << "[CoreLib] Registered Service: " << service_name << std::endl;
     }
 
-   shared_ptr<TProcessor> getProcessor(const string& service_name) {
+    std::shared_ptr<apache::thrift::TProcessor> getProcessor(const std::string& service_name) {
         auto it = processors_.find(service_name);
         return (it != processors_.end()) ? it->second : nullptr;
     }
@@ -48,7 +52,7 @@ public:
     static void staticRegisterCallback(void* factory_instance, const char* service_name, void* t_processor_ptr) {
         ProcessorFactory* factory = static_cast<ProcessorFactory*>(factory_instance);
         // 使用 shared_ptr 包装 TProcessor，保证其生命周期
-       shared_ptr<TProcessor> processor((TProcessor*)t_processor_ptr);
+        std::shared_ptr<apache::thrift::TProcessor> processor((apache::thrift::TProcessor*)t_processor_ptr);
         factory->registerProcessor(service_name, processor);
     }
     void clean()
@@ -62,20 +66,21 @@ public:
 
 static TC::ProcessorFactory global_factory; 
 static bool core_initialized = false;
-static vector<void*> plugin_handles;
+static std::vector<void*> plugin_handles;
+
 
 // --- B. 插件加载器函数 ---
 static void load_plugin(const char* plugin_path) {
     void* handle = dlopen(plugin_path, RTLD_LAZY | RTLD_GLOBAL);
     if (!handle) {
-        cerr << "[CoreLib Error]: Cannot open library " << plugin_path << ": " << dlerror() << endl;
+        std::cerr << "[CoreLib Error]: Cannot open library " << plugin_path << ": " << dlerror() << std::endl;
         return;
     }
     plugin_handles.push_back(handle);
 
     RegisterProcessorFunc register_func = (RegisterProcessorFunc)dlsym(handle, PLUGIN_REGISTER_FUNC_NAME);
     if (!register_func) {
-        cerr << "[CoreLib Error]: Cannot find function " << PLUGIN_REGISTER_FUNC_NAME << " in " << plugin_path << ": " << dlerror() << endl;
+        std::cerr << "[CoreLib Error]: Cannot find function " << PLUGIN_REGISTER_FUNC_NAME << " in " << plugin_path << ": " << dlerror() << std::endl;
         return;
     }
 
@@ -92,15 +97,15 @@ static void load_plugins_from_directory(const char* dir_path) {
     DIR *dp;
     struct dirent *dirp;
 
-    cout << "--- CoreLib Scanning plugin directory: " << dir_path << " ---" << endl;
+    std::cout << "--- CoreLib Scanning plugin directory: " << dir_path << " ---" << std::endl;
 
     if ((dp = opendir(dir_path)) == NULL) {
         // 如果目录不存在，创建目录（可选，简化错误处理）
         if (errno == ENOENT) {
-            cout << "[CoreLib Info]: Plugin directory not found. Skipping scan." << endl;
+            std::cout << "[CoreLib Info]: Plugin directory not found. Skipping scan." << std::endl;
             return;
         }
-        cerr << "[CoreLib Error]: Could not open directory " << dir_path << ": " << strerror(errno) << endl;
+        std::cerr << "[CoreLib Error]: Could not open directory " << dir_path << ": " << strerror(errno) << std::endl;
         return;
     }
 
@@ -116,7 +121,7 @@ static void load_plugins_from_directory(const char* dir_path) {
         if (name_len > suffix_len && 
             strcmp(d_name + name_len - suffix_len, PLUGIN_SUFFIX) == 0) 
         {
-            string full_path = string(dir_path) + "/" + d_name;
+            std::string full_path = std::string(dir_path) + "/" + d_name;
             load_plugin(full_path.c_str());
         }
     }
@@ -140,25 +145,25 @@ static char* process_thrift_data_generic(
     // 核心 RPC 逻辑 (与前例相同)
     if (!core_initialized) return nullptr;
 
-    string service_str(service_name, service_len);
-    shared_ptr<TProcessor> processor = global_factory.getProcessor(service_str);
+    std::string service_str(service_name, service_len);
+    std::shared_ptr<apache::thrift::TProcessor> processor = global_factory.getProcessor(service_str);
 
     if (!processor) {
         return nullptr;
     }
     
-    shared_ptr<TMemoryBuffer> input_transport(new TMemoryBuffer((uint8_t*)input_buf, input_len));
-    shared_ptr<TMemoryBuffer> output_transport(new TMemoryBuffer());
+    std::shared_ptr<apache::thrift::transport::TMemoryBuffer> input_transport(new apache::thrift::transport::TMemoryBuffer((uint8_t*)input_buf, input_len));
+    std::shared_ptr<apache::thrift::transport::TMemoryBuffer> output_transport(new apache::thrift::transport::TMemoryBuffer());
     
-    shared_ptr<TBinaryProtocol> input_protocol(new TBinaryProtocol(input_transport));
-    shared_ptr<TBinaryProtocol> output_protocol(new TBinaryProtocol(output_transport));
+    std::shared_ptr<apache::thrift::protocol::TBinaryProtocol> input_protocol(new apache::thrift::protocol::TBinaryProtocol(input_transport));
+    std::shared_ptr<apache::thrift::protocol::TBinaryProtocol> output_protocol(new apache::thrift::protocol::TBinaryProtocol(output_transport));
 
     try {
         if (!processor->process(input_protocol, output_protocol, nullptr)) {
                 return nullptr;
         }
-    } catch (const TException& tx) {
-        cerr << "[CoreLib Exception]: " << tx.what() << endl;
+    } catch (const apache::thrift::TException& tx) {
+        std::cerr << "[CoreLib Exception]: " << tx.what() << std::endl;
         return nullptr;
     }
     
@@ -173,12 +178,268 @@ static char* process_thrift_data_generic(
     
     return result; 
 }
+  
+// --- 类结构体定义 ---
+typedef struct _php_thrift_bridge_transport_object {
+    // 存储 serviceName (当前调用的目标 Service 名称)
+    zend_string *serviceName; 
+    
+    // 存储 wBuf (写入缓冲区)
+    zend_string *wBuf;
 
+    // 存储 rBuf (读取缓冲区)
+    zend_string *rBuf;
+    
+    // 存储 rBufPos (读取缓冲区当前位置)
+    zend_long rBufPos;
+    
+    // Zend 引擎要求必须包含 zend_object
+    zend_object std; 
+} php_thrift_bridge_transport_object;
+
+zend_class_entry *thrift_bridge_transport_ce;
+zend_class_entry *thrift_transport_exception_ce;
+static zend_object_handlers thrift_bridge_handlers;
+
+// --- 辅助宏：用于从 zend_object 获取自定义结构体 ---
+static zend_always_inline php_thrift_bridge_transport_object *php_thrift_bridge_transport_fetch_object(zend_object *obj) {
+    // 通过结构体成员的偏移量计算自定义结构体的起始地址
+    return (php_thrift_bridge_transport_object *)((char *)(obj) - XtOffsetOf(php_thrift_bridge_transport_object, std));
+}
+
+static void php_thrift_bridge_transport_dtor_object(zend_object *object)
+{
+    php_thrift_bridge_transport_object *intern = php_thrift_bridge_transport_fetch_object(object);
+    
+    if (intern->serviceName) {
+        zend_string_release(intern->serviceName);
+    }
+    if (intern->wBuf) {
+        zend_string_release(intern->wBuf);
+    }
+    if (intern->rBuf) {
+        zend_string_release(intern->rBuf);
+    }
+    
+    // 调用父类的析构函数
+    zend_objects_destroy_object(object);
+}
+
+// 对象的创建函数：为 Zend 对象分配自定义结构体
+static zend_object *php_thrift_bridge_transport_create_object(zend_class_entry *ce)
+{
+    php_thrift_bridge_transport_object *intern;
+
+    // 分配内存
+    intern = (php_thrift_bridge_transport_object *) 
+        emalloc(sizeof(php_thrift_bridge_transport_object) + zend_object_properties_size(ce));
+    zend_object_std_init(&intern->std, ce);
+
+    // 【删除原有的两行错误代码】
+    // intern->std.handlers 指向我们全局静态的、可写的 handlers
+    intern->std.handlers = &thrift_bridge_handlers; // <--- 关键修正
+    // 初始化属性
+    intern->serviceName = NULL;
+    intern->wBuf = NULL;
+    intern->rBuf = NULL;
+    intern->rBufPos = 0;
+
+    
+    return &intern->std;
+}
 
 // -----------------------------------------------------
 // C 库导出函数
 // -----------------------------------------------------
 extern "C" {
+
+ZEND_METHOD(ThriftBridgeTransport, __construct)
+{
+    zend_string *service_name_str;
+    
+    // 获取当前对象的 C 结构体
+    php_thrift_bridge_transport_object *intern = php_thrift_bridge_transport_fetch_object(Z_OBJ_P(getThis()));
+    
+    // S 表示接收 zend_string
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &service_name_str) == FAILURE) {
+        return;
+    }
+
+    // 存储 serviceName，使用 zend_string_copy 拷贝字符串
+    intern->serviceName = zend_string_copy(service_name_str); 
+    
+    // 初始化 wBuf/rBuf 为空字符串 (使用常量，不需要释放)
+    intern->wBuf = ZSTR_EMPTY_ALLOC();
+    intern->rBuf = ZSTR_EMPTY_ALLOC();
+    intern->rBufPos = 0;
+}
+
+// public function isOpen() { return true; }
+ZEND_METHOD(ThriftBridgeTransport, isOpen)
+{
+    RETURN_TRUE;
+}
+
+// public function open() {}
+ZEND_METHOD(ThriftBridgeTransport, open)
+{
+    // NOOP
+}
+
+// public function close() {}
+ZEND_METHOD(ThriftBridgeTransport, close)
+{
+    // NOOP
+}
+
+// public function write($buf)
+ZEND_METHOD(ThriftBridgeTransport, write)
+{
+    zend_string *buf;
+    
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &buf) == FAILURE) {
+        return;
+    }
+    
+    php_thrift_bridge_transport_object *intern = php_thrift_bridge_transport_fetch_object(Z_OBJ_P(getThis()));
+
+    // 获取当前 wBuf 的长度和新数据的长度
+    size_t old_len = ZSTR_LEN(intern->wBuf);
+    size_t write_len = ZSTR_LEN(buf);
+    size_t new_len = old_len + write_len;
+    
+    // 1. 分配新的 zend_string 空间
+    // 使用 zend_string_safe_alloc(len_factor, size, extra, persistent)
+    zend_string *new_wBuf = zend_string_safe_alloc(1, new_len, 1, 0); 
+    
+    // 2. 拷贝旧数据 (intern->wBuf)
+    memcpy(ZSTR_VAL(new_wBuf), ZSTR_VAL(intern->wBuf), old_len);
+    
+    // 3. 拷贝新数据 (buf)
+    memcpy(ZSTR_VAL(new_wBuf) + old_len, ZSTR_VAL(buf), write_len);
+    
+    // 4. 设置新字符串的长度和终止符
+    ZSTR_LEN(new_wBuf) = new_len;
+    ZSTR_VAL(new_wBuf)[new_len] = '\0'; // 必须手动添加终止符
+    
+    // 5. 释放旧的 wBuf，更新指针
+    zend_string_release(intern->wBuf); 
+    intern->wBuf = new_wBuf;
+}
+
+
+// public function read($len)
+ZEND_METHOD(ThriftBridgeTransport, read)
+{
+    zend_long len;
+    php_thrift_bridge_transport_object *intern;
+    
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "l", &len) == FAILURE) {
+        return;
+    }
+    
+    intern = php_thrift_bridge_transport_fetch_object(Z_OBJ_P(getThis()));
+    
+    // 检查 rBuf 是否已关闭或未flush (PHP 版本中是 rBuf === null)
+    if (intern->rBuf == NULL) {
+        zend_throw_exception_ex(NULL, 0, "Transport is closed or not flushed.");
+        return;
+    }
+    
+    size_t total_len = ZSTR_LEN(intern->rBuf);
+    
+    // 可读取的长度
+    size_t read_len = (size_t)len;
+    size_t remaining_len = total_len - intern->rBufPos;
+    
+    if (read_len > remaining_len) {
+        read_len = remaining_len;
+    }
+    
+    // 检查是否需要抛出 "No more data to read" 异常
+    if (read_len == 0 && len > 0) {
+        // 这是 Thrift 抛出 "No more data to read" 异常的条件
+        zend_throw_exception_ex(NULL, 0, "Cannot read %ld bytes from transport.", len);
+        return;
+    }
+
+    // 截取并返回读取的数据
+    RETVAL_STRINGL(ZSTR_VAL(intern->rBuf) + intern->rBufPos, read_len);
+    
+    // 更新读取位置
+    intern->rBufPos += read_len;
+}
+
+// public function flush()
+ZEND_METHOD(ThriftBridgeTransport, flush)
+{
+    php_thrift_bridge_transport_object *intern = php_thrift_bridge_transport_fetch_object(Z_OBJ_P(getThis()));
+    
+    // --- 1. 获取请求数据 (intern->wBuf) ---
+    const char *requestBinary = ZSTR_VAL(intern->wBuf);
+    size_t requestBinaryLen = ZSTR_LEN(intern->wBuf);
+
+    // --- 2. 调用 C++ CoreLib 函数 ---
+    size_t responseLen = 0;
+    char* responseBinary = process_thrift_data_generic(
+        ZSTR_VAL(intern->serviceName), ZSTR_LEN(intern->serviceName),
+        requestBinary, requestBinaryLen,
+        &responseLen
+    );
+
+    // --- 3. 检查 CoreLib 返回结果 ---
+    if (responseBinary == NULL) {
+        // 抛出 TTransportException
+        zend_throw_exception_ex(NULL, 0, "CoreLib RPC failed or returned null.");
+        return;
+    }
+
+    // --- 4. 将响应数据存入读取缓冲区 ---
+    // 释放旧的 rBuf
+    zend_string_release(intern->rBuf); 
+    
+    // 将 C/C++ 返回的 char* 转换为 zend_string (会进行拷贝)
+    intern->rBuf = zend_string_init(responseBinary, responseLen, 0); 
+    free(responseBinary); // 释放 C++ 层分配的内存 (重要!)
+    
+    intern->rBufPos = 0;
+    
+    // --- 5. 清空写入缓冲区 ---
+    zend_string_release(intern->wBuf);
+    intern->wBuf = ZSTR_EMPTY_ALLOC();
+}
+
+
+const zend_function_entry thrift_bridge_transport_methods[] = {
+    ZEND_ME(ThriftBridgeTransport, __construct, NULL, ZEND_ACC_PUBLIC|ZEND_ACC_CTOR)
+    ZEND_ME(ThriftBridgeTransport, isOpen,      NULL, ZEND_ACC_PUBLIC)
+    ZEND_ME(ThriftBridgeTransport, open,        NULL, ZEND_ACC_PUBLIC)
+    ZEND_ME(ThriftBridgeTransport, close,       NULL, ZEND_ACC_PUBLIC)
+    ZEND_ME(ThriftBridgeTransport, read,        NULL, ZEND_ACC_PUBLIC)
+    ZEND_ME(ThriftBridgeTransport, write,       NULL, ZEND_ACC_PUBLIC)
+    ZEND_ME(ThriftBridgeTransport, flush,       NULL, ZEND_ACC_PUBLIC)
+    PHP_FE_END
+};
+
+
+// 类注册函数
+static void php_thrift_bridge_transport_init(INIT_FUNC_ARGS)
+{
+    zend_class_entry ce;
+    
+    // 假设 TTransport_ce 已经通过外部头文件或扩展加载
+    zend_class_entry *parent_ce = NULL; // 替换为 TTransport 的 zend_class_entry
+
+    INIT_CLASS_ENTRY(ce, "ThriftBridgeTransport", thrift_bridge_transport_methods);
+    
+    // 注册类，并设置继承关系
+    thrift_bridge_transport_ce = zend_register_internal_class_ex(&ce, parent_ce);
+    
+    // 设置对象的创建和销毁处理器
+    thrift_bridge_transport_ce->create_object = php_thrift_bridge_transport_create_object;
+}
+
+
 ZEND_BEGIN_MODULE_GLOBALS(thrift_bridge)
     char *plugin_dir;
 ZEND_END_MODULE_GLOBALS(thrift_bridge)
@@ -202,6 +463,9 @@ PHP_MSHUTDOWN_FUNCTION(thrift_bridge);
 // --- 模块初始化函数 (MINIT) ---
 PHP_MINIT_FUNCTION(thrift_bridge)
 {
+    memcpy(&thrift_bridge_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+    thrift_bridge_handlers.dtor_obj = php_thrift_bridge_transport_dtor_object;
+    php_thrift_bridge_transport_init(type, module_number);
     ZEND_INIT_MODULE_GLOBALS(thrift_bridge, php_thrift_bridge_init_globals, NULL);
     REGISTER_INI_ENTRIES();
     return SUCCESS;
@@ -234,47 +498,6 @@ PHP_RINIT_FUNCTION(thrift_bridge)
     return SUCCESS;
 }
 
-// --- PHP 函数实现 (通用 RPC 调用) ---
-PHP_FUNCTION(call_thrift_processor_generic)
-{
-    char *service_name = NULL;
-    size_t service_len;
-    char *input_buf = NULL;
-    size_t input_len;
-    
-    // 1. 解析两个字符串参数: ServiceName 和 BinaryData ("ss")
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", 
-                              &service_name, &service_len,
-                              &input_buf, &input_len) == FAILURE) 
-    {
-        return; // zend_parse_parameters 失败会设置错误状态
-    }
-
-    size_t output_len = 0;
-    char* output_buf = NULL;
-    
-    // 2. 调用 C++ 通用处理器
-    output_buf = process_thrift_data_generic(
-        service_name, service_len,
-        input_buf, input_len, 
-        &output_len
-    );
-
-    if (output_buf == NULL) {
-        // 如果返回 NULL，说明 C++ 侧处理失败或 Service 未注册
-        php_error_docref(NULL, E_WARNING, "RPC failed, check CoreLib output for errors. Service: %.*s", 
-                         (int)service_len, service_name);
-        RETURN_FALSE;
-    }
-
-    // 3. 返回结果并释放内存
-    // RETURN_STRINGL 会复制 output_buf 中的数据到 PHP 内存
-    RETURN_STRINGL(output_buf, output_len); 
-    
-    // 4. 释放 C++ 核心库中 malloc 的内存
-    free(output_buf); 
-}
-
 // --- PHP MINFO (模块信息) 函数 ---
 PHP_MINFO_FUNCTION(thrift_bridge)
 {
@@ -285,17 +508,11 @@ PHP_MINFO_FUNCTION(thrift_bridge)
     php_info_print_table_end();
 }
 
-// --- 扩展函数列表 ---
-const zend_function_entry thrift_bridge_functions[] = {
-    PHP_FE(call_thrift_processor_generic, NULL) 
-    PHP_FE_END
-};
-
 // --- 扩展模块入口定义 ---
 zend_module_entry thrift_bridge_module_entry = {
     STANDARD_MODULE_HEADER,
     "thrift_bridge",        /* 扩展名称 */
-    thrift_bridge_functions, 
+    NULL, 
     PHP_MINIT(thrift_bridge),                   /* MINT (模块初始化) */
     PHP_MSHUTDOWN(thrift_bridge),                   /* MSHUTDOWN (模块关闭) */
     PHP_RINIT(thrift_bridge), /* RINIT (请求初始化) */

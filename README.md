@@ -40,7 +40,7 @@ extern "C" {
     void register_thrift_processors(ProcessorFactoryContext* context) {
         cout << "  [ServiceA Plugin] Initializing DynamicServiceA..." << endl;
         
-        boost::shared_ptr<DynamicServiceAHandler> handlerA(new DynamicServiceAHandler());
+        std::shared_ptr<DynamicServiceAHandler> handlerA(new DynamicServiceAHandler());
         // TProcessor* 裸指针
         TProcessor* processorA = new DynamicServiceAProcessor(handlerA); 
 
@@ -67,24 +67,9 @@ g++ -std=c++11 -fPIC -shared -o ./plugins/libservice_a.so \
 
 ### php调用
 ```php
-// 1. 实例化我们的桥接 Transport
-    $transport = new ThriftBridgeTransport($serviceName);
-    
-    // 2. 实例化标准的 Protocol
-    $protocol = new TBinaryProtocol($transport);
-
-    // 3. 实例化 Client
-    $clientClassName = "DynamicExt\\" . $serviceName . "Client";
-    $client = new $clientClassName($protocol); 
-
-    // 4. 标准的 Transport 操作
-    $transport->open(); 
-    
-    // 5. 准备参数对象
-    $inputData = new InputData($params);
-    
-    // 6. 调用 Client 方法 (触发 write 和 flush)
-    $output = $client->process_transaction_a($inputData);
-    
-    $transport->close();
+$serviceName = 'DynamicServiceA';
+// 3. 实例化 Client
+$client = new DynamicExt\DynamicServiceAClient(new TBinaryProtocolAccelerated(new ThriftBridgeTransport($serviceName))); 
+$input_success = ['transaction_id' => 101, 'amount' => 60.00];
+$output_success = $client->process_transaction_a(new InputData($input_success));
 ```
